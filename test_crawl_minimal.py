@@ -19,13 +19,13 @@ logger = logging.getLogger(__name__)
 def test_minimal_crawl():
     """최소한의 크롤링 테스트 (단지 1개)"""
     logger.info("=" * 80)
-    logger.info("✅ Selenium 버전 크롤링 테스트 시작!")
-    logger.info("실제 Chrome 브라우저를 사용하여 쿠키를 획득합니다.")
+    logger.info("✅ Playwright 버전 크롤링 테스트 시작!")
+    logger.info("실제 Chromium 브라우저를 사용하여 쿠키를 획득합니다.")
     logger.info("주의: 2배 빠른 속도 (0.5-30분 대기)")
     logger.info("=" * 80)
     
-    # 크롤러 생성 (Selenium 사용!)
-    scraper = NaverRealEstateScraper(use_selenium=True)
+    # 크롤러 생성 (Playwright 사용!)
+    scraper = NaverRealEstateScraper(use_browser=True)
     
     # 강남구 대치동 지역 코드
     cortarNo = "1168010600"

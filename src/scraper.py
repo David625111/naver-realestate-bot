@@ -15,16 +15,13 @@ import logging
 from datetime import datetime
 import numpy as np
 
-# Selenium 관련 임포트
+# Playwright 관련 임포트 (Selenium 대체)
 try:
-    import undetected_chromedriver as uc
-    from selenium.webdriver.common.by import By
-    from selenium.webdriver.support.ui import WebDriverWait
-    from selenium.webdriver.support import expected_conditions as EC
-    SELENIUM_AVAILABLE = True
+    from playwright.sync_api import sync_playwright
+    PLAYWRIGHT_AVAILABLE = True
 except ImportError:
-    SELENIUM_AVAILABLE = False
-    logging.warning("Selenium을 사용할 수 없습니다. pip install undetected-chromedriver 설치가 필요합니다.")
+    PLAYWRIGHT_AVAILABLE = False
+    logging.warning("Playwright를 사용할 수 없습니다. pip install playwright 설치가 필요합니다.")
 
 # 로깅 설정
 logging.basicConfig(
@@ -111,16 +108,21 @@ class NaverRealEstateScraper:
     
     BASE_URL = "https://new.land.naver.com"
     
-    def __init__(self, use_selenium: bool = True):
+    def __init__(self, use_browser: bool = True):
         """
         크롤러 초기화
         
         Args:
-            use_selenium: Selenium 사용 여부 (True: 실제 브라우저, False: requests만)
+            use_browser: Playwright 브라우저 사용 여부 (True: 실제 브라우저, False: requests만)
         """
         self.session = requests.Session()
-        self.use_selenium = use_selenium and SELENIUM_AVAILABLE
-        self.driver = None  # Selenium WebDriver
+        self.use_browser = use_browser and PLAYWRIGHT_AVAILABLE
+        
+        # Playwright 관련
+        self.playwright = None
+        self.browser = None
+        self.context = None
+        self.page = None
         
         # ✅ 개선: 세션 시작 시 브라우저 프로필을 한 번만 선택 (핵심!)
         # 실제 사용자는 한 세션에서 브라우저를 바꾸지 않음!
@@ -131,9 +133,9 @@ class NaverRealEstateScraper:
         
         self._set_fixed_headers()  # 헤더를 한 번만 설정
         
-        # Selenium 초기화
-        if self.use_selenium:
-            self._init_selenium()
+        # Playwright 초기화
+        if self.use_browser:
+            self._init_playwright()
         
         self._visit_homepage()  # 초기 방문으로 쿠키 받기
         
@@ -143,70 +145,77 @@ class NaverRealEstateScraper:
         self.session_start_time = time.time()  # 세션 시작 시간
         self.fatigue_level = 0.0  # 피로도 (0.0 ~ 1.0)
     
-    def _init_selenium(self):
+    def _init_playwright(self):
         """
-        ✅ Selenium WebDriver 초기화 (undetected-chromedriver)
+        ✅ Playwright 초기화 (더 안정적!)
         
-        실제 Chrome 브라우저를 사용하여 쿠키를 획득합니다.
+        실제 Chromium 브라우저를 사용하여 쿠키를 획득합니다.
         """
         try:
-            logger.info("🚀 Selenium (Chrome) 초기화 중...")
+            logger.info("🚀 Playwright (Chromium) 초기화 중...")
             
-            # undetected-chromedriver 옵션 설정
-            options = uc.ChromeOptions()
+            # Playwright 인스턴스 생성
+            self.playwright = sync_playwright().start()
             
-            # 헤드리스 모드 (백그라운드 실행)
-            # options.add_argument('--headless')  # 디버깅 시 주석 처리
+            # 브라우저 실행 (헤드리스 모드)
+            self.browser = self.playwright.chromium.launch(
+                headless=False,  # ✅ 디버깅용: 브라우저 창이 보임
+                args=[
+                    '--disable-blink-features=AutomationControlled',
+                    '--no-sandbox',
+                    '--disable-dev-shm-usage'
+                ]
+            )
             
-            # 기타 옵션
-            options.add_argument('--no-sandbox')
-            options.add_argument('--disable-dev-shm-usage')
-            options.add_argument('--disable-blink-features=AutomationControlled')
-            options.add_argument(f'user-agent={self.browser_profile["user_agent"]}')
+            # 브라우저 컨텍스트 생성 (쿠키 격리)
+            self.context = self.browser.new_context(
+                user_agent=self.browser_profile['user_agent'],
+                viewport={'width': 1920, 'height': 1080},
+                locale='ko-KR'
+            )
             
-            # WebDriver 생성
-            self.driver = uc.Chrome(options=options, version_main=None)
+            # 페이지 생성
+            self.page = self.context.new_page()
             
-            logger.info("✅ Selenium 초기화 완료!")
+            logger.info("✅ Playwright 초기화 완료!")
             
         except Exception as e:
-            logger.error(f"❌ Selenium 초기화 실패: {e}")
+            logger.error(f"❌ Playwright 초기화 실패: {e}")
             logger.warning("⚠️  requests 모드로 전환합니다.")
-            self.use_selenium = False
-            self.driver = None
+            self.use_browser = False
+            self.playwright = None
+            self.browser = None
+            self.context = None
+            self.page = None
     
     def _visit_homepage(self):
         """
         ✅ 네이버 부동산 홈페이지 방문 (쿠키 받기)
         
-        Selenium 사용 시: 실제 브라우저로 방문하여 JavaScript 실행 → 쿠키 획득!
+        Playwright 사용 시: 실제 브라우저로 방문하여 JavaScript 실행 → 쿠키 획득!
         requests 사용 시: 기존 방식 (쿠키 획득 실패 가능)
         """
-        if self.use_selenium and self.driver:
-            # ✅ Selenium으로 메인 페이지 방문 (쿠키 획득 성공!)
+        if self.use_browser and self.page:
+            # ✅ Playwright로 메인 페이지 방문 (쿠키 획득 성공!)
             try:
-                logger.info("🌐 Selenium으로 네이버 부동산 메인 페이지 방문 중...")
+                logger.info("🌐 Playwright로 네이버 부동산 메인 페이지 방문 중...")
                 
-                self.driver.get(self.BASE_URL)
-                
-                # 페이지 로딩 대기 (최대 10초)
-                WebDriverWait(self.driver, 10).until(
-                    EC.presence_of_element_located((By.TAG_NAME, "body"))
-                )
+                # 페이지 방문 (네트워크 완전 로딩 대기)
+                self.page.goto(self.BASE_URL, wait_until='networkidle', timeout=30000)
                 
                 # 쿠키 획득 및 requests Session에 전달
-                selenium_cookies = self.driver.get_cookies()
+                playwright_cookies = self.context.cookies()
                 
-                if selenium_cookies:
-                    for cookie in selenium_cookies:
+                if playwright_cookies:
+                    for cookie in playwright_cookies:
                         self.session.cookies.set(cookie['name'], cookie['value'])
                     
                     self.cookies_received = True
                     self.last_cookie_refresh = time.time()
-                    logger.info(f"✅ 쿠키 수신 성공: {len(selenium_cookies)}개")
+                    logger.info(f"✅ 쿠키 수신 성공: {len(playwright_cookies)}개")
                     
                     # 주요 쿠키 로깅
-                    cookie_names = [c['name'] for c in selenium_cookies]
+                    cookie_names = [c['name'] for c in playwright_cookies]
                     important_cookies = ['NNB', 'JSESSIONID', 'nid_inf', 'NID_AUT', 'NID_SES']
                     found_cookies = [key for key in important_cookies if key in cookie_names]
                     if found_cookies:
@@ -215,12 +224,12 @@ class NaverRealEstateScraper:
                     logger.warning("⚠️  쿠키를 받지 못했습니다.")
                 
                 time.sleep(random.uniform(2, 4))
-                logger.info("✅ Selenium 초기 방문 완료 (세션 준비됨)")
+                logger.info("✅ Playwright 초기 방문 완료 (세션 준비됨)")
                 
             except Exception as e:
-                logger.error(f"❌ Selenium 방문 실패: {e}")
+                logger.error(f"❌ Playwright 방문 실패: {e}")
                 logger.warning("⚠️  requests 모드로 전환합니다.")
-                self.use_selenium = False
+                self.use_browser = False
         
         else:
             # ❌ requests만 사용 (쿠키 획득 실패 가능)
@@ -424,7 +433,7 @@ class NaverRealEstateScraper:
         """
         ✅ API 호출 전에 해당 페이지를 먼저 방문 (랜딩 페이지 전략)
         
-        Selenium 사용 시: 실제 브라우저로 방문하여 쿠키 갱신
+        Playwright 사용 시: 실제 브라우저로 방문하여 쿠키 갱신
         requests 사용 시: 기존 방식
         
         Args:
@@ -438,27 +447,22 @@ class NaverRealEstateScraper:
         
         landing_url = landing_urls.get(page_type, self.BASE_URL)
         
-        if self.use_selenium and self.driver:
-            # ✅ Selenium으로 페이지 방문 (쿠키 갱신)
+        if self.use_browser and self.page:
+            # ✅ Playwright로 페이지 방문 (쿠키 갱신)
             try:
-                logger.info(f"🚪 Selenium으로 랜딩 페이지 방문: {landing_url}")
+                logger.info(f"🚪 Playwright로 랜딩 페이지 방문: {landing_url}")
                 
-                self.driver.get(landing_url)
-                
-                # 페이지 로딩 대기
-                WebDriverWait(self.driver, 5).until(
-                    EC.presence_of_element_located((By.TAG_NAME, "body"))
-                )
+                self.page.goto(landing_url, wait_until='domcontentloaded', timeout=10000)
                 
                 # 쿠키 갱신
-                selenium_cookies = self.driver.get_cookies()
-                for cookie in selenium_cookies:
+                playwright_cookies = self.context.cookies()
+                for cookie in playwright_cookies:
                     self.session.cookies.set(cookie['name'], cookie['value'])
                 
                 time.sleep(random.uniform(0.5, 1.5))
                 
             except Exception as e:
-                logger.warning(f"⚠️  Selenium 랜딩 페이지 방문 실패: {e}")
+                logger.warning(f"⚠️  Playwright 랜딩 페이지 방문 실패: {e}")
         
         else:
             # ❌ requests로 페이지 방문
@@ -830,18 +834,36 @@ class NaverRealEstateScraper:
 
 
     def __del__(self):
-        """소멸자: Selenium WebDriver 종료"""
-        if self.driver:
+        """소멸자: Playwright 종료"""
+        if self.page:
             try:
-                self.driver.quit()
-                logger.info("✅ Selenium WebDriver 종료됨")
+                self.page.close()
+            except:
+                pass
+        
+        if self.context:
+            try:
+                self.context.close()
+            except:
+                pass
+        
+        if self.browser:
+            try:
+                self.browser.close()
+                logger.info("✅ Playwright 브라우저 종료됨")
+            except:
+                pass
+        
+        if self.playwright:
+            try:
+                self.playwright.stop()
             except:
                 pass
 
 
 if __name__ == "__main__":
     # 테스트 코드
-    scraper = NaverRealEstateScraper(use_selenium=True)  # ✅ Selenium 사용!
+    scraper = NaverRealEstateScraper(use_browser=True)  # ✅ Playwright 사용!
     
     # 강남구 대치동 지역 코드
     cortarNo = "1168010600"
@@ -855,6 +877,5 @@ if __name__ == "__main__":
             print(properties[0])
     
     finally:
-        # Selenium 종료
-        if scraper.driver:
-            scraper.driver.quit()
+        # Playwright 종료
+        del scraper
