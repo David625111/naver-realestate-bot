@@ -600,6 +600,61 @@ class NaverRealEstateScraper:
         
         return None
     
+    def search_complexes_browser(self, cortarNo: str, trade_type: str = "B1") -> List[Dict]:
+        """
+        ✅ Playwright로 단지 목록 페이지를 직접 스크래핑 (API 호출 없음!)
+        
+        Args:
+            cortarNo: 지역 코드
+            trade_type: 거래 유형 (A1: 매매, B1: 전세, B2: 월세)
+            
+        Returns:
+            단지 목록
+        """
+        if not self.use_browser or not self.page:
+            logger.warning("⚠️  Playwright가 초기화되지 않았습니다. 빈 목록을 반환합니다.")
+            return []
+        
+        try:
+            # 단지 검색 페이지 URL
+            url = f"https://new.land.naver.com/complexes?cortarNo={cortarNo}&tradeType={trade_type}"
+            
+            logger.info(f"🌐 Playwright로 단지 목록 페이지 방문: {url}")
+            
+            # 페이지 방문
+            self.page.goto(url, wait_until='networkidle', timeout=30000)
+            
+            # 페이지 로딩 대기 (단지 목록이 나타날 때까지)
+            self.page.wait_for_selector('.complex_list_item', timeout=10000)
+            
+            # 단지 목록 추출
+            complexes = []
+            
+            # JavaScript로 페이지 데이터 추출
+            complex_data = self.page.evaluate("""
+                () => {
+                    const items = document.querySelectorAll('.complex_list_item');
+                    return Array.from(items).map(item => {
+                        const link = item.querySelector('a');
+                        const name = item.querySelector('.complex_title')?.textContent?.trim();
+                        const complexNo = link?.href?.match(/complexNo=(\\d+)/)?.[1];
+                        
+                        return {
+                            complexNo: complexNo,
+                            complexName: name,
+                        };
+                    });
+                }
+            """)
+            
+            logger.info(f"✅ Playwright로 {len(complex_data)}개 단지 발견!")
+            
+            return complex_data
+            
+        except Exception as e:
+            logger.error(f"❌ Playwright 단지 검색 실패: {e}")
+            return []
+    
     def search_complexes(self, cortarNo: str, trade_type: str = "A1") -> List[Dict]:
         """
         지역별 단지 검색
@@ -648,6 +703,65 @@ class NaverRealEstateScraper:
         
         logger.warning("단지 검색 실패")
         return []
+    
+    def get_complex_articles_browser(self, complex_no: str, trade_type: str = "B1") -> List[Dict]:
+        """
+        ✅ Playwright로 단지의 매물 목록을 직접 스크래핑 (API 호출 없음!)
+        
+        Args:
+            complex_no: 단지 번호
+            trade_type: 거래 유형
+            
+        Returns:
+            매물 목록
+        """
+        if not self.use_browser or not self.page:
+            logger.warning("⚠️  Playwright가 초기화되지 않았습니다. 빈 목록을 반환합니다.")
+            return []
+        
+        try:
+            # 단지 상세 페이지 URL
+            url = f"https://new.land.naver.com/complexes/{complex_no}?tradeType={trade_type}"
+            
+            logger.info(f"🌐 Playwright로 단지 상세 페이지 방문: {url}")
+            
+            # 페이지 방문
+            self.page.goto(url, wait_until='networkidle', timeout=30000)
+            
+            # 매물 탭 클릭 대기
+            try:
+                self.page.wait_for_selector('.complex_detail_article_list', timeout=5000)
+            except:
+                logger.warning("⚠️  매물 목록을 찾을 수 없습니다.")
+                return []
+            
+            # 매물 목록 추출
+            article_data = self.page.evaluate("""
+                () => {
+                    const items = document.querySelectorAll('.item_inner');
+                    return Array.from(items).map(item => {
+                        const articleNo = item.getAttribute('data-atclno');
+                        const price = item.querySelector('.price')?.textContent?.trim();
+                        const area = item.querySelector('.area')?.textContent?.trim();
+                        const floor = item.querySelector('.floor')?.textContent?.trim();
+                        
+                        return {
+                            articleNo: articleNo,
+                            price: price,
+                            area: area,
+                            floor: floor
+                        };
+                    });
+                }
+            """)
+            
+            logger.info(f"✅ Playwright로 {len(article_data)}개 매물 발견!")
+            
+            return article_data
+            
+        except Exception as e:
+            logger.error(f"❌ Playwright 매물 검색 실패: {e}")
+            return []
     
     def get_complex_articles(self, complex_no: str, trade_type: str = "A1") -> List[Dict]:
         """
@@ -751,8 +865,13 @@ class NaverRealEstateScraper:
                 logger.info(f"🔄 거래 유형 전환 휴식: {long_delay_minutes:.1f}분 ({long_delay:.0f}초)")
                 time.sleep(long_delay)
             
-            # 1. 단지 목록 가져오기
-            complexes = self.search_complexes(cortarNo, trade_type)
+            # ✅ 1. Playwright로 단지 목록 가져오기 (API 호출 없음!)
+            if self.use_browser:
+                logger.info("✅ Playwright 브라우저 자동화 모드!")
+                complexes = self.search_complexes_browser(cortarNo, trade_type)
+            else:
+                logger.info("⚠️  requests 모드 (차단 가능성 높음)")
+                complexes = self.search_complexes(cortarNo, trade_type)
             
             # 순서 무작위화 (Shuffle) - 사람처럼 불규칙하게!
             if complexes:
@@ -766,9 +885,11 @@ class NaverRealEstateScraper:
                 
                 logger.info(f"[{i}/{len(complexes[:10])}] {complex_name} (complexNo: {complex_no})")
                 
-                # ✅ 개선: requests에서는 마우스 시뮬레이션이 의미 없으므로 제거
-                
-                articles = self.get_complex_articles(complex_no, trade_type)
+                # ✅ Playwright로 매물 가져오기 (API 호출 없음!)
+                if self.use_browser:
+                    articles = self.get_complex_articles_browser(complex_no, trade_type)
+                else:
+                    articles = self.get_complex_articles(complex_no, trade_type)
                 
                 # 매물 순서도 무작위화 (Shuffle)
                 if articles:
