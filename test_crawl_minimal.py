@@ -17,18 +17,37 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 def test_minimal_crawl():
-    """최소한의 크롤링 테스트 (단지 1개)"""
+    """최소한의 크롤링 테스트 (사용자 설정 기반)"""
+    
+    # ✅ .env 파일에서 설정 읽기
+    import os
+    from dotenv import load_dotenv
+    import json
+    
+    load_dotenv()
+    
+    search_regions = os.getenv('SEARCH_REGIONS', '').split(',')
+    trade_types = os.getenv('TRADE_TYPES', 'B1,B2').split(',')
+    
+    # ✅ 필터 로드
+    try:
+        with open('config/filters.json', 'r', encoding='utf-8') as f:
+            filters = json.load(f)
+    except:
+        filters = {}
+    
     logger.info("=" * 80)
-    logger.info("✅ Playwright 버전 크롤링 테스트 시작!")
-    logger.info("실제 Chromium 브라우저를 사용하여 쿠키를 획득합니다.")
-    logger.info("주의: 2배 빠른 속도 (0.5-30분 대기)")
+    logger.info("✅ Playwright 버전 크롤링 테스트!")
+    logger.info("사용자 설정 기반 실행:")
+    logger.info(f"  - 지역 코드: {search_regions}")
+    logger.info(f"  - 거래 유형: {trade_types}")
     logger.info("=" * 80)
     
     # 크롤러 생성 (Playwright 사용!)
     scraper = NaverRealEstateScraper(use_browser=True)
     
-    # 강남구 대치동 지역 코드
-    cortarNo = "1168010600"
+    # ✅ 사용자 설정 지역 사용!
+    cortarNo = search_regions[0].strip() if search_regions else "1168010600"
     
     try:
         # ✅ Playwright로 단지 검색 (API 호출 없음!)

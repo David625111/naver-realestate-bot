@@ -624,26 +624,40 @@ class NaverRealEstateScraper:
             # 페이지 방문
             self.page.goto(url, wait_until='networkidle', timeout=30000)
             
-            # 페이지 로딩 대기 (단지 목록이 나타날 때까지)
-            self.page.wait_for_selector('.complex_list_item', timeout=10000)
+            # 페이지 로딩 대기 (React 렌더링 완료까지)
+            time.sleep(5)
             
-            # 단지 목록 추출
-            complexes = []
+            # ✅ 올바른 선택자로 단지 목록 추출!
+            logger.info("📊 단지 데이터 추출 중...")
             
-            # JavaScript로 페이지 데이터 추출
             complex_data = self.page.evaluate("""
                 () => {
-                    const items = document.querySelectorAll('.complex_list_item');
+                    // 실제 네이버 부동산 클래스 사용!
+                    const items = document.querySelectorAll('.complex_data');
+                    
                     return Array.from(items).map(item => {
-                        const link = item.querySelector('a');
-                        const name = item.querySelector('.complex_title')?.textContent?.trim();
-                        const complexNo = link?.href?.match(/complexNo=(\\d+)/)?.[1];
+                        const titleEl = item.querySelector('.complex_title');
+                        const name = titleEl?.textContent?.trim();
+                        
+                        // 링크에서 complexNo 추출
+                        const link = item.querySelector('a') || titleEl?.closest('a');
+                        const complexNo = link?.href?.match(/complexes\\/(\\d+)/)?.[1];
+                        
+                        // 가격 정보
+                        const priceEl = item.querySelector('.complex_price');
+                        const price = priceEl?.textContent?.trim();
+                        
+                        // 크기 정보
+                        const sizeEl = item.querySelector('.complex_size');
+                        const size = sizeEl?.textContent?.trim();
                         
                         return {
                             complexNo: complexNo,
                             complexName: name,
+                            price: price,
+                            size: size
                         };
-                    });
+                    }).filter(item => item.complexNo && item.complexName);
                 }
             """)
             
@@ -653,6 +667,8 @@ class NaverRealEstateScraper:
             
         except Exception as e:
             logger.error(f"❌ Playwright 단지 검색 실패: {e}")
+            import traceback
+            traceback.print_exc()
             return []
     
     def search_complexes(self, cortarNo: str, trade_type: str = "A1") -> List[Dict]:
@@ -728,39 +744,55 @@ class NaverRealEstateScraper:
             # 페이지 방문
             self.page.goto(url, wait_until='networkidle', timeout=30000)
             
-            # 매물 탭 클릭 대기
-            try:
-                self.page.wait_for_selector('.complex_detail_article_list', timeout=5000)
-            except:
-                logger.warning("⚠️  매물 목록을 찾을 수 없습니다.")
-                return []
+            # React 렌더링 대기
+            time.sleep(5)
             
-            # 매물 목록 추출
+            # ✅ 매물 목록 추출 (실제 구조 기반)
+            logger.info("📊 매물 데이터 추출 중...")
+            
             article_data = self.page.evaluate("""
                 () => {
-                    const items = document.querySelectorAll('.item_inner');
-                    return Array.from(items).map(item => {
-                        const articleNo = item.getAttribute('data-atclno');
-                        const price = item.querySelector('.price')?.textContent?.trim();
-                        const area = item.querySelector('.area')?.textContent?.trim();
-                        const floor = item.querySelector('.floor')?.textContent?.trim();
+                    // 매물 관련 모든 요소 찾기
+                    const articleElements = document.querySelectorAll('[class*="article"]');
+                    
+                    const articles = [];
+                    articleElements.forEach(el => {
+                        // articleNo 찾기
+                        const link = el.querySelector('a');
+                        const articleNo = link?.href?.match(/articles\\/(\\d+)/)?.[1];
                         
-                        return {
-                            articleNo: articleNo,
-                            price: price,
-                            area: area,
-                            floor: floor
-                        };
+                        if (articleNo) {
+                            const priceEl = el.querySelector('[class*="price"]');
+                            const areaEl = el.querySelector('[class*="area"]');
+                            const floorEl = el.querySelector('[class*="floor"]');
+                            
+                            articles.push({
+                                articleNo: articleNo,
+                                price: priceEl?.textContent?.trim() || '',
+                                area: areaEl?.textContent?.trim() || '',
+                                floor: floorEl?.textContent?.trim() || ''
+                            });
+                        }
                     });
+                    
+                    return articles;
                 }
             """)
             
             logger.info(f"✅ Playwright로 {len(article_data)}개 매물 발견!")
             
+            # 매물이 없으면 스크린샷 저장 (디버깅용)
+            if len(article_data) == 0:
+                screenshot_path = f'debug_complex_{complex_no}.png'
+                self.page.screenshot(path=screenshot_path)
+                logger.warning(f"⚠️  매물이 없습니다. 스크린샷 저장: {screenshot_path}")
+            
             return article_data
             
         except Exception as e:
             logger.error(f"❌ Playwright 매물 검색 실패: {e}")
+            import traceback
+            traceback.print_exc()
             return []
     
     def get_complex_articles(self, complex_no: str, trade_type: str = "A1") -> List[Dict]:
