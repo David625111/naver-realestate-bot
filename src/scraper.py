@@ -100,6 +100,9 @@ class NaverRealEstateScraper:
         """크롤러 초기화"""
         self.session = requests.Session()
         self.current_browser_profile = None  # 현재 브라우저 프로파일
+        self.cookies_received = False  # 쿠키 수신 여부
+        self.last_cookie_refresh = time.time()  # 마지막 쿠키 갱신 시간
+        
         self._update_headers()
         self._visit_homepage()  # 초기 방문으로 쿠키 받기
         
@@ -113,14 +116,45 @@ class NaverRealEstateScraper:
         """
         네이버 부동산 홈페이지 방문 (쿠키 받기)
         실제 브라우저처럼 동작하기 위해
+        
+        중요: 이 과정에서 NNB, JSESSIONID 등 네이버 쿠키를 받아야 합니다!
         """
         try:
-            logger.info("네이버 부동산 홈페이지 방문 중...")
-            self.session.get(self.BASE_URL, timeout=10)
+            logger.info("🌐 네이버 부동산 메인 페이지 방문 중 (쿠키 수신)...")
+            
+            # Accept 헤더를 HTML 페이지용으로 변경
+            original_accept = self.session.headers.get('Accept', '')
+            self.session.headers['Accept'] = 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7'
+            
+            # 메인 페이지 방문
+            response = self.session.get(self.BASE_URL, timeout=10)
+            
+            # 쿠키 수신 확인
+            cookies = self.session.cookies.get_dict()
+            if cookies:
+                self.cookies_received = True
+                self.last_cookie_refresh = time.time()
+                logger.info(f"✅ 쿠키 수신 성공: {len(cookies)}개")
+                
+                # 주요 쿠키 로깅 (NNB, JSESSIONID 등)
+                important_cookies = ['NNB', 'JSESSIONID', 'nid_inf', 'NID_AUT', 'NID_SES']
+                found_cookies = [key for key in important_cookies if key in cookies]
+                if found_cookies:
+                    logger.info(f"🍪 주요 쿠키 확인: {', '.join(found_cookies)}")
+                else:
+                    logger.warning("⚠️  주요 쿠키(NNB, JSESSIONID)를 찾지 못했습니다.")
+            else:
+                logger.warning("⚠️  쿠키를 받지 못했습니다. 차단될 가능성 높음!")
+            
+            # Accept 헤더 복원
+            if original_accept:
+                self.session.headers['Accept'] = original_accept
+            
             time.sleep(random.uniform(2, 4))
-            logger.info("초기 방문 완료")
+            logger.info("✅ 초기 방문 완료 (세션 준비됨)")
+            
         except Exception as e:
-            logger.warning(f"초기 방문 실패: {e}")
+            logger.warning(f"❌ 초기 방문 실패: {e}")
     
     def _update_headers(self):
         """
@@ -133,6 +167,7 @@ class NaverRealEstateScraper:
         
         # 기본 헤더 (모든 브라우저 공통)
         headers = {
+            'Host': 'new.land.naver.com',  # 명시적 설정 (중요!)
             'User-Agent': self.current_browser_profile['user_agent'],
             'Accept': self.current_browser_profile['accept'],
             'Accept-Language': self.current_browser_profile['accept_language'],
@@ -301,6 +336,56 @@ class NaverRealEstateScraper:
         session_duration = (time.time() - self.session_start_time) / 3600  # 시간 단위
         self.fatigue_level = min(1.0, session_duration * 0.1)  # 10시간 후 최대
     
+    def _check_and_refresh_cookies(self):
+        """
+        쿠키 유효성 검사 및 필요시 재방문
+        
+        네이버 쿠키는 시간이 지나면 만료될 수 있으므로,
+        일정 시간(30분)마다 메인 페이지를 다시 방문하여 쿠키를 갱신합니다.
+        """
+        # 30분(1800초)마다 쿠키 갱신
+        cookie_lifetime = 1800  # 30분
+        current_time = time.time()
+        
+        if not self.cookies_received or (current_time - self.last_cookie_refresh) > cookie_lifetime:
+            logger.info("🔄 쿠키 만료 또는 미수신 → 메인 페이지 재방문...")
+            self._visit_homepage()
+    
+    def _visit_landing_page(self, page_type: str):
+        """
+        API 호출 전에 해당 페이지를 먼저 방문 (랜딩 페이지 전략)
+        
+        Args:
+            page_type: 'complexes' (단지 목록), 'complex' (단지 상세), 'articles' (매물 목록)
+        """
+        landing_urls = {
+            'complexes': 'https://new.land.naver.com/complexes',
+            'complex': 'https://new.land.naver.com/complexes',
+            'articles': 'https://new.land.naver.com/articles',
+        }
+        
+        landing_url = landing_urls.get(page_type, self.BASE_URL)
+        
+        try:
+            logger.info(f"🚪 랜딩 페이지 방문: {landing_url}")
+            
+            # Accept 헤더를 HTML 페이지용으로 변경
+            original_accept = self.session.headers.get('Accept', '')
+            self.session.headers['Accept'] = 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8'
+            
+            # 페이지 방문
+            self.session.get(landing_url, timeout=10)
+            
+            # Accept 헤더 복원 (API 요청용)
+            if original_accept:
+                self.session.headers['Accept'] = original_accept
+            
+            # 짧은 대기 (0.5-1.5초)
+            time.sleep(random.uniform(0.5, 1.5))
+            
+        except Exception as e:
+            logger.warning(f"⚠️  랜딩 페이지 방문 실패: {e}")
+    
     def _get_referer_for_url(self, url: str) -> str:
         """
         URL에 따라 적절한 Referer 반환 (Referer 체인)
@@ -336,6 +421,9 @@ class NaverRealEstateScraper:
         Returns:
             JSON 응답 또는 None
         """
+        # 쿠키 유효성 검사 및 갱신
+        self._check_and_refresh_cookies()
+        
         # 요청 전 휴식 필요 여부 확인
         if self._should_take_break():
             self._take_break()
@@ -348,6 +436,11 @@ class NaverRealEstateScraper:
                 # URL에 맞는 Referer 설정
                 referer = self._get_referer_for_url(url)
                 self.session.headers['Referer'] = referer
+                
+                # 쿠키 상태 로깅 (디버깅용)
+                if self.request_count % 10 == 0:  # 10번마다
+                    cookies_count = len(self.session.cookies.get_dict())
+                    logger.info(f"🍪 현재 쿠키 수: {cookies_count}개")
                 
                 # 사람처럼 불규칙한 대기 (분 단위, 정규분포)
                 if attempt == 0:
@@ -420,6 +513,9 @@ class NaverRealEstateScraper:
         Returns:
             단지 정보 리스트
         """
+        # API 호출 전 랜딩 페이지 먼저 방문 (중요!)
+        self._visit_landing_page('complexes')
+        
         url = f"{self.BASE_URL}/api/complexes"
         
         params = {
@@ -466,6 +562,9 @@ class NaverRealEstateScraper:
         Returns:
             매물 정보 리스트
         """
+        # API 호출 전 랜딩 페이지 먼저 방문 (중요!)
+        self._visit_landing_page('complex')
+        
         url = f"{self.BASE_URL}/api/articles/complex/{complex_no}"
         
         params = {
