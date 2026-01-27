@@ -22,24 +22,76 @@ logger = logging.getLogger(__name__)
 class NaverRealEstateScraper:
     """네이버 부동산 크롤러 클래스"""
     
-    # 다양한 User-Agent 리스트 (차단 회피) - 더 다양하게!
-    USER_AGENTS = [
-        # Chrome (Windows)
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
-        # Chrome (Mac)
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        # Firefox (Windows)
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0',
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
-        # Firefox (Mac)
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:122.0) Gecko/20100101 Firefox/122.0',
-        # Edge
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36 Edg/121.0.0.0',
-        # Safari (Mac)
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15',
+    # 브라우저별 완전한 프로파일 (Fingerprinting 우회)
+    BROWSER_PROFILES = [
+        # Chrome 121 (Windows) - 최신 버전
+        {
+            'type': 'chrome',
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+            'sec_ch_ua': '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
+            'sec_ch_ua_mobile': '?0',
+            'sec_ch_ua_platform': '"Windows"',
+            'accept': 'application/json, text/plain, */*',
+            'accept_language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
+        },
+        # Chrome 120 (Windows)
+        {
+            'type': 'chrome',
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'sec_ch_ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+            'sec_ch_ua_mobile': '?0',
+            'sec_ch_ua_platform': '"Windows"',
+            'accept': 'application/json, text/plain, */*',
+            'accept_language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
+        },
+        # Chrome 121 (Mac)
+        {
+            'type': 'chrome',
+            'user_agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+            'sec_ch_ua': '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
+            'sec_ch_ua_mobile': '?0',
+            'sec_ch_ua_platform': '"macOS"',
+            'accept': 'application/json, text/plain, */*',
+            'accept_language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
+        },
+        # Firefox 122 (Windows)
+        {
+            'type': 'firefox',
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0',
+            'accept': 'application/json, text/plain, */*',
+            'accept_language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
+        },
+        # Firefox 121 (Windows)
+        {
+            'type': 'firefox',
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
+            'accept': 'application/json, text/plain, */*',
+            'accept_language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
+        },
+        # Firefox 122 (Mac)
+        {
+            'type': 'firefox',
+            'user_agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:122.0) Gecko/20100101 Firefox/122.0',
+            'accept': 'application/json, text/plain, */*',
+            'accept_language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
+        },
+        # Edge 121 (Windows)
+        {
+            'type': 'edge',
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36 Edg/121.0.0.0',
+            'sec_ch_ua': '"Not A(Brand";v="99", "Microsoft Edge";v="121", "Chromium";v="121"',
+            'sec_ch_ua_mobile': '?0',
+            'sec_ch_ua_platform': '"Windows"',
+            'accept': 'application/json, text/plain, */*',
+            'accept_language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
+        },
+        # Safari 17.2 (Mac)
+        {
+            'type': 'safari',
+            'user_agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15',
+            'accept': 'application/json, text/javascript, */*; q=0.01',
+            'accept_language': 'ko-KR,ko;q=0.9',
+        },
     ]
     
     BASE_URL = "https://new.land.naver.com"
@@ -47,6 +99,7 @@ class NaverRealEstateScraper:
     def __init__(self):
         """크롤러 초기화"""
         self.session = requests.Session()
+        self.current_browser_profile = None  # 현재 브라우저 프로파일
         self._update_headers()
         self._visit_homepage()  # 초기 방문으로 쿠키 받기
         
@@ -70,15 +123,55 @@ class NaverRealEstateScraper:
             logger.warning(f"초기 방문 실패: {e}")
     
     def _update_headers(self):
-        """요청 헤더 업데이트 (차단 회피)"""
-        self.session.headers.update({
-            'User-Agent': random.choice(self.USER_AGENTS),
-            'Referer': 'https://new.land.naver.com/',
-            'Accept': 'application/json, text/plain, */*',
-            'Accept-Language': 'ko-KR,ko;q=0.9,en;q=0.8',
+        """
+        요청 헤더 업데이트 (Fingerprinting 완벽 우회)
+        브라우저별로 완전히 다른 헤더 프로파일 사용
+        """
+        # 브라우저 프로파일 무작위 선택
+        self.current_browser_profile = random.choice(self.BROWSER_PROFILES)
+        browser_type = self.current_browser_profile['type']
+        
+        # 기본 헤더 (모든 브라우저 공통)
+        headers = {
+            'User-Agent': self.current_browser_profile['user_agent'],
+            'Accept': self.current_browser_profile['accept'],
+            'Accept-Language': self.current_browser_profile['accept_language'],
             'Accept-Encoding': 'gzip, deflate, br',
+            'Referer': 'https://new.land.naver.com/',
+            'Origin': 'https://new.land.naver.com',
             'Connection': 'keep-alive',
-        })
+            'DNT': '1',  # Do Not Track
+            'Upgrade-Insecure-Requests': '1',
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache',
+        }
+        
+        # Chrome/Edge 전용 헤더 (Sec-Fetch-*, sec-ch-ua)
+        if browser_type in ['chrome', 'edge']:
+            headers.update({
+                'sec-ch-ua': self.current_browser_profile['sec_ch_ua'],
+                'sec-ch-ua-mobile': self.current_browser_profile['sec_ch_ua_mobile'],
+                'sec-ch-ua-platform': self.current_browser_profile['sec_ch_ua_platform'],
+                'Sec-Fetch-Site': 'same-origin',
+                'Sec-Fetch-Mode': 'cors',
+                'Sec-Fetch-Dest': 'empty',
+            })
+        
+        # Firefox 전용 헤더
+        elif browser_type == 'firefox':
+            headers.update({
+                'TE': 'trailers',  # Firefox 고유
+            })
+        
+        # Safari 전용 헤더
+        elif browser_type == 'safari':
+            # Safari는 sec-ch-ua 없음
+            pass
+        
+        self.session.headers.clear()
+        self.session.headers.update(headers)
+        
+        logger.info(f"🌐 브라우저 프로파일 변경: {browser_type.upper()} - {self.current_browser_profile['user_agent'][:50]}...")
     
     def _human_like_delay(self, base_min_minutes: float = 1.0, base_max_minutes: float = 3.0) -> float:
         """
@@ -208,6 +301,29 @@ class NaverRealEstateScraper:
         session_duration = (time.time() - self.session_start_time) / 3600  # 시간 단위
         self.fatigue_level = min(1.0, session_duration * 0.1)  # 10시간 후 최대
     
+    def _get_referer_for_url(self, url: str) -> str:
+        """
+        URL에 따라 적절한 Referer 반환 (Referer 체인)
+        
+        Args:
+            url: 요청 URL
+            
+        Returns:
+            적절한 Referer URL
+        """
+        if '/api/complexes' in url:
+            # 단지 검색 API → 메인 페이지에서 온 것처럼
+            return 'https://new.land.naver.com/'
+        elif '/api/articles/complex/' in url:
+            # 매물 목록 API → 단지 페이지에서 온 것처럼
+            return 'https://new.land.naver.com/complexes'
+        elif '/api/articles/' in url:
+            # 매물 상세 API → 매물 목록에서 온 것처럼
+            return 'https://new.land.naver.com/articles'
+        else:
+            # 기본값
+            return 'https://new.land.naver.com/'
+    
     def _safe_request(self, url: str, params: Dict = None, retry: int = 3) -> Optional[Dict]:
         """
         안전한 HTTP 요청 (재시도 포함, 429 에러 특별 처리, 사람처럼 행동)
@@ -228,6 +344,10 @@ class NaverRealEstateScraper:
             try:
                 # 요청마다 User-Agent 변경 (다양한 브라우저 사용)
                 self._update_headers()
+                
+                # URL에 맞는 Referer 설정
+                referer = self._get_referer_for_url(url)
+                self.session.headers['Referer'] = referer
                 
                 # 사람처럼 불규칙한 대기 (분 단위, 정규분포)
                 if attempt == 0:
