@@ -31,12 +31,12 @@ def test_minimal_crawl():
     cortarNo = "1168010600"
     
     try:
-        # 단지 검색
+        # ✅ Playwright로 단지 검색 (API 호출 없음!)
         logger.info(f"\n[1/3] 단지 검색 중... (cortarNo: {cortarNo})")
-        complexes = scraper.search_complexes(cortarNo, trade_type="B1")  # 전세
+        complexes = scraper.search_complexes_browser(cortarNo, trade_type="B1")  # ✅ Playwright!
         
         if not complexes:
-            logger.error("단지를 찾지 못했습니다. 429 에러 또는 차단되었을 가능성 있음.")
+            logger.error("단지를 찾지 못했습니다.")
             return False
         
         logger.info(f"✅ 검색된 단지 수: {len(complexes)}개")
@@ -47,8 +47,9 @@ def test_minimal_crawl():
             complex_no = complex_info.get('complexNo')
             complex_name = complex_info.get('complexName', '알 수 없음')
             
+            # ✅ Playwright로 매물 검색 (API 호출 없음!)
             logger.info(f"\n[2/3] 매물 목록 가져오기... ({complex_name})")
-            articles = scraper.get_complex_articles(complex_no, trade_type="B1")
+            articles = scraper.get_complex_articles_browser(complex_no, trade_type="B1")  # ✅ Playwright!
             
             if articles:
                 logger.info(f"✅ 검색된 매물 수: {len(articles)}개")
