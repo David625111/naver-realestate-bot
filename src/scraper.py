@@ -151,10 +151,48 @@ class NaverRealEstateScraper:
         # 휴식 후 피로도 감소
         self.fatigue_level = max(0, self.fatigue_level - 0.2)
     
+    def _simulate_mouse_movement(self):
+        """
+        마우스 움직임 시뮬레이션 (특정 좌표로 부드럽게 이동)
+        """
+        # 마우스를 여러 단계로 나눠 부드럽게 이동 (5-10단계)
+        steps = random.randint(5, 10)
+        
+        logger.info(f"🖱️  마우스 움직임 시뮬레이션 ({steps}단계)...")
+        
+        for i in range(steps):
+            # 각 단계마다 0.1~0.5초 대기
+            step_delay = random.uniform(0.1, 0.5)
+            time.sleep(step_delay)
+    
+    def _simulate_scroll(self):
+        """
+        페이지 스크롤 시뮬레이션 (위아래 불규칙하게)
+        """
+        # 스크롤 횟수 (2-5회)
+        scroll_count = random.randint(2, 5)
+        
+        logger.info(f"📜 페이지 스크롤 시뮬레이션 ({scroll_count}회)...")
+        
+        for i in range(scroll_count):
+            # 각 스크롤마다 0.3~1.0초 대기
+            scroll_delay = random.uniform(0.3, 1.0)
+            time.sleep(scroll_delay)
+            
+            # 가끔 위로 스크롤 (20% 확률)
+            if random.random() < 0.2:
+                logger.info(f"   ↑ 위로 스크롤")
+            else:
+                logger.info(f"   ↓ 아래로 스크롤")
+    
     def _simulate_reading(self):
         """
         페이지를 읽는 시간 시뮬레이션 (스크롤, 클릭 등) - 분 단위
         """
+        # 마우스 움직임 + 스크롤 + 읽기
+        self._simulate_mouse_movement()
+        self._simulate_scroll()
+        
         # 감마 분포로 읽기 시간 (1분~5분, 평균 2.5분)
         reading_minutes = np.random.gamma(2, 1.5)
         reading_minutes = min(5, max(1, reading_minutes))
@@ -338,6 +376,9 @@ class NaverRealEstateScraper:
             articles = data['articleList']
             logger.info(f"검색된 매물 수: {len(articles)}")
             
+            # 페이지 스크롤 시뮬레이션
+            self._simulate_scroll()
+            
             # 사람처럼 불규칙한 대기 (2분~5분, 정규분포)
             delay = self._human_like_delay(2.0, 5.0)  # 2-5분
             delay_minutes = delay / 60
@@ -399,6 +440,11 @@ class NaverRealEstateScraper:
             # 1. 단지 목록 가져오기
             complexes = self.search_complexes(cortarNo, trade_type)
             
+            # 순서 무작위화 (Shuffle) - 사람처럼 불규칙하게!
+            if complexes:
+                random.shuffle(complexes)
+                logger.info(f"🔀 단지 순서 무작위화 완료 (총 {len(complexes)}개)")
+            
             # 2. 각 단지의 매물 가져오기
             for i, complex_info in enumerate(complexes[:10], 1):  # 테스트: 상위 10개만
                 complex_no = complex_info.get('complexNo')
@@ -406,7 +452,15 @@ class NaverRealEstateScraper:
                 
                 logger.info(f"[{i}/{len(complexes[:10])}] {complex_name} (complexNo: {complex_no})")
                 
+                # 마우스 클릭 전 움직임 시뮬레이션
+                self._simulate_mouse_movement()
+                
                 articles = self.get_complex_articles(complex_no, trade_type)
+                
+                # 매물 순서도 무작위화 (Shuffle)
+                if articles:
+                    random.shuffle(articles)
+                    logger.info(f"🔀 매물 순서 무작위화 완료 (총 {len(articles)}개)")
                 
                 for article in articles:
                     # 매물 데이터 가공
