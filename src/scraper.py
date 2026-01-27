@@ -99,11 +99,15 @@ class NaverRealEstateScraper:
     def __init__(self):
         """크롤러 초기화"""
         self.session = requests.Session()
-        self.current_browser_profile = None  # 현재 브라우저 프로파일
+        
+        # ✅ 개선: 세션 시작 시 브라우저 프로필을 한 번만 선택 (핵심!)
+        # 실제 사용자는 한 세션에서 브라우저를 바꾸지 않음!
+        self.browser_profile = random.choice(self.BROWSER_PROFILES)
+        
         self.cookies_received = False  # 쿠키 수신 여부
         self.last_cookie_refresh = time.time()  # 마지막 쿠키 갱신 시간
         
-        self._update_headers()
+        self._set_fixed_headers()  # 헤더를 한 번만 설정
         self._visit_homepage()  # 초기 방문으로 쿠키 받기
         
         # 사람처럼 행동하기 위한 상태 관리
@@ -156,21 +160,23 @@ class NaverRealEstateScraper:
         except Exception as e:
             logger.warning(f"❌ 초기 방문 실패: {e}")
     
-    def _update_headers(self):
+    def _set_fixed_headers(self):
         """
-        요청 헤더 업데이트 (Fingerprinting 완벽 우회)
-        브라우저별로 완전히 다른 헤더 프로파일 사용
+        ✅ 개선: 세션 시작 시 브라우저 정보를 한 번만 설정 (핵심!)
+        
+        실제 사용자는 한 세션 내에서 브라우저를 바꾸지 않습니다.
+        동일한 쿠키를 가진 유저가 매 요청마다 브라우저를 바꾸면
+        서버는 즉시 봇으로 인식합니다!
         """
-        # 브라우저 프로파일 무작위 선택
-        self.current_browser_profile = random.choice(self.BROWSER_PROFILES)
-        browser_type = self.current_browser_profile['type']
+        profile = self.browser_profile
+        browser_type = profile['type']
         
         # 기본 헤더 (모든 브라우저 공통)
         headers = {
             'Host': 'new.land.naver.com',  # 명시적 설정 (중요!)
-            'User-Agent': self.current_browser_profile['user_agent'],
-            'Accept': self.current_browser_profile['accept'],
-            'Accept-Language': self.current_browser_profile['accept_language'],
+            'User-Agent': profile['user_agent'],
+            'Accept': profile['accept'],
+            'Accept-Language': profile['accept_language'],
             'Accept-Encoding': 'gzip, deflate, br',
             'Referer': 'https://new.land.naver.com/',
             'Origin': 'https://new.land.naver.com',
@@ -184,9 +190,9 @@ class NaverRealEstateScraper:
         # Chrome/Edge 전용 헤더 (Sec-Fetch-*, sec-ch-ua)
         if browser_type in ['chrome', 'edge']:
             headers.update({
-                'sec-ch-ua': self.current_browser_profile['sec_ch_ua'],
-                'sec-ch-ua-mobile': self.current_browser_profile['sec_ch_ua_mobile'],
-                'sec-ch-ua-platform': self.current_browser_profile['sec_ch_ua_platform'],
+                'sec-ch-ua': profile['sec_ch_ua'],
+                'sec-ch-ua-mobile': profile['sec_ch_ua_mobile'],
+                'sec-ch-ua-platform': profile['sec_ch_ua_platform'],
                 'Sec-Fetch-Site': 'same-origin',
                 'Sec-Fetch-Mode': 'cors',
                 'Sec-Fetch-Dest': 'empty',
@@ -206,11 +212,14 @@ class NaverRealEstateScraper:
         self.session.headers.clear()
         self.session.headers.update(headers)
         
-        logger.info(f"🌐 브라우저 프로파일 변경: {browser_type.upper()} - {self.current_browser_profile['user_agent'][:50]}...")
+        logger.info(f"🌐 브라우저 프로파일 고정: {browser_type.upper()}")
+        logger.info(f"   User-Agent: {profile['user_agent'][:80]}...")
     
-    def _human_like_delay(self, base_min_minutes: float = 1.0, base_max_minutes: float = 3.0) -> float:
+    def _human_like_delay(self, base_min_minutes: float = 0.5, base_max_minutes: float = 1.5) -> float:
         """
-        사람처럼 불규칙한 대기 시간 생성 (분 단위, 정규분포 사용)
+        ✅ 개선: 2배 빠른 속도로 조정 (1-3분 → 0.5-1.5분)
+        
+        사람처럼 불규칙한 대기 시간 생성 (정규분포 사용)
         
         Args:
             base_min_minutes: 최소 대기 시간 (분)
@@ -261,17 +270,19 @@ class NaverRealEstateScraper:
     
     def _take_break(self):
         """
-        긴 휴식 시간 (사람이 커피 마시거나 점심 먹는 시간) - 분 단위
+        ✅ 개선: 2배 빠른 휴식 시간 (10-30분 → 5-15분)
+        
+        긴 휴식 시간 (사람이 커피 마시거나 점심 먹는 시간)
         """
-        # 베타 분포로 더 자연스러운 휴식 시간 (10분~30분, 평균 20분)
+        # 베타 분포로 더 자연스러운 휴식 시간 (5분~15분, 평균 10분)
         alpha, beta = 2, 2
         normalized = np.random.beta(alpha, beta)
-        break_minutes = 10 + normalized * 20  # 10~30분
+        break_minutes = 5 + normalized * 10  # 5~15분 (2배 빠름!)
         break_seconds = break_minutes * 60
         
         self.last_break_count = self.request_count
         
-        logger.info(f"☕ 장시간 휴식 (점심/커피): {break_minutes:.1f}분 ({break_seconds:.0f}초) 대기...")
+        logger.info(f"☕ 장시간 휴식 (커피/간식): {break_minutes:.1f}분 ({break_seconds:.0f}초) 대기...")
         logger.info(f"   (총 {self.request_count}개 요청 완료, 피로도: {self.fatigue_level:.2f})")
         
         time.sleep(break_seconds)
@@ -279,54 +290,19 @@ class NaverRealEstateScraper:
         # 휴식 후 피로도 감소
         self.fatigue_level = max(0, self.fatigue_level - 0.2)
     
-    def _simulate_mouse_movement(self):
-        """
-        마우스 움직임 시뮬레이션 (특정 좌표로 부드럽게 이동)
-        """
-        # 마우스를 여러 단계로 나눠 부드럽게 이동 (5-10단계)
-        steps = random.randint(5, 10)
-        
-        logger.info(f"🖱️  마우스 움직임 시뮬레이션 ({steps}단계)...")
-        
-        for i in range(steps):
-            # 각 단계마다 0.1~0.5초 대기
-            step_delay = random.uniform(0.1, 0.5)
-            time.sleep(step_delay)
-    
-    def _simulate_scroll(self):
-        """
-        페이지 스크롤 시뮬레이션 (위아래 불규칙하게)
-        """
-        # 스크롤 횟수 (2-5회)
-        scroll_count = random.randint(2, 5)
-        
-        logger.info(f"📜 페이지 스크롤 시뮬레이션 ({scroll_count}회)...")
-        
-        for i in range(scroll_count):
-            # 각 스크롤마다 0.3~1.0초 대기
-            scroll_delay = random.uniform(0.3, 1.0)
-            time.sleep(scroll_delay)
-            
-            # 가끔 위로 스크롤 (20% 확률)
-            if random.random() < 0.2:
-                logger.info(f"   ↑ 위로 스크롤")
-            else:
-                logger.info(f"   ↓ 아래로 스크롤")
-    
     def _simulate_reading(self):
         """
-        페이지를 읽는 시간 시뮬레이션 (스크롤, 클릭 등) - 분 단위
+        ✅ 개선: requests에서는 마우스/스크롤이 의미 없으므로 단순 지연으로 변경
+        
+        페이지를 읽는 시간 시뮬레이션 (초 단위로 2배 빠르게!)
         """
-        # 마우스 움직임 + 스크롤 + 읽기
-        self._simulate_mouse_movement()
-        self._simulate_scroll()
+        # 감마 분포로 읽기 시간 (30초~150초, 평균 75초)
+        # 기존: 1-5분 → 개선: 0.5-2.5분 (2배 빠름!)
+        reading_seconds = np.random.gamma(2, 1.5) * 30
+        reading_seconds = min(150, max(30, reading_seconds))
+        reading_minutes = reading_seconds / 60
         
-        # 감마 분포로 읽기 시간 (1분~5분, 평균 2.5분)
-        reading_minutes = np.random.gamma(2, 1.5)
-        reading_minutes = min(5, max(1, reading_minutes))
-        reading_seconds = reading_minutes * 60
-        
-        logger.info(f"📖 매물 상세 읽는 중... {reading_minutes:.1f}분 ({reading_seconds:.0f}초)")
+        logger.info(f"📖 페이지 읽는 중... {reading_minutes:.1f}분 ({reading_seconds:.0f}초)")
         time.sleep(reading_seconds)
     
     def _update_fatigue(self):
@@ -430,10 +406,8 @@ class NaverRealEstateScraper:
         
         for attempt in range(retry):
             try:
-                # 요청마다 User-Agent 변경 (다양한 브라우저 사용)
-                self._update_headers()
-                
-                # URL에 맞는 Referer 설정
+                # ✅ 개선: User-Agent는 세션 시작 시 한 번만 설정했으므로 여기서 변경하지 않음!
+                # Referer만 URL에 맞게 동적으로 변경합니다.
                 referer = self._get_referer_for_url(url)
                 self.session.headers['Referer'] = referer
                 
@@ -442,9 +416,9 @@ class NaverRealEstateScraper:
                     cookies_count = len(self.session.cookies.get_dict())
                     logger.info(f"🍪 현재 쿠키 수: {cookies_count}개")
                 
-                # 사람처럼 불규칙한 대기 (분 단위, 정규분포)
+                # ✅ 개선: 2배 빠른 대기 시간 (1-3분 → 0.5-1.5분)
                 if attempt == 0:
-                    delay = self._human_like_delay(1.0, 3.0)  # 1-3분
+                    delay = self._human_like_delay(0.5, 1.5)  # 0.5-1.5분 (2배 빠름!)
                     delay_minutes = delay / 60
                     logger.info(f"🤔 생각하는 중... {delay_minutes:.1f}분 ({delay:.0f}초)")
                     time.sleep(delay)
@@ -595,11 +569,8 @@ class NaverRealEstateScraper:
             articles = data['articleList']
             logger.info(f"검색된 매물 수: {len(articles)}")
             
-            # 페이지 스크롤 시뮬레이션
-            self._simulate_scroll()
-            
-            # 사람처럼 불규칙한 대기 (2분~5분, 정규분포)
-            delay = self._human_like_delay(2.0, 5.0)  # 2-5분
+            # ✅ 개선: 2배 빠른 대기 시간 (2-5분 → 1-2.5분)
+            delay = self._human_like_delay(1.0, 2.5)  # 1-2.5분 (2배 빠름!)
             delay_minutes = delay / 60
             logger.info(f"🕒 매물 목록 확인 중... {delay_minutes:.1f}분 ({delay:.0f}초)")
             time.sleep(delay)
@@ -624,8 +595,8 @@ class NaverRealEstateScraper:
         logger.info(f"매물 상세 정보: articleNo={article_no}")
         data = self._safe_request(url)
         
-        # 사람처럼 상세 정보 읽기 (1분~3분, 정규분포)
-        delay = self._human_like_delay(1.0, 3.0)  # 1-3분
+        # ✅ 개선: 2배 빠른 대기 시간 (1-3분 → 0.5-1.5분)
+        delay = self._human_like_delay(0.5, 1.5)  # 0.5-1.5분 (2배 빠름!)
         delay_minutes = delay / 60
         logger.info(f"📄 상세 정보 읽는 중... {delay_minutes:.1f}분 ({delay:.0f}초)")
         time.sleep(delay)
@@ -649,9 +620,9 @@ class NaverRealEstateScraper:
             logger.info(f"=== 거래 유형 {trade_type} 크롤링 시작 ===")
             logger.info(f"📊 진행 상황: {idx + 1}/{len(trade_types)}, 총 요청: {self.request_count}회, 피로도: {self.fatigue_level:.2f}")
             
-            # 거래 유형 간 Long Sleep (2번째부터, 30분~60분)
+            # ✅ 개선: 2배 빠른 거래 전환 휴식 (30-60분 → 15-30분)
             if idx > 0:
-                long_delay = self._human_like_delay(30.0, 60.0)  # 30-60분
+                long_delay = self._human_like_delay(15.0, 30.0)  # 15-30분 (2배 빠름!)
                 long_delay_minutes = long_delay / 60
                 logger.info(f"🔄 거래 유형 전환 휴식: {long_delay_minutes:.1f}분 ({long_delay:.0f}초)")
                 time.sleep(long_delay)
@@ -671,8 +642,7 @@ class NaverRealEstateScraper:
                 
                 logger.info(f"[{i}/{len(complexes[:10])}] {complex_name} (complexNo: {complex_no})")
                 
-                # 마우스 클릭 전 움직임 시뮬레이션
-                self._simulate_mouse_movement()
+                # ✅ 개선: requests에서는 마우스 시뮬레이션이 의미 없으므로 제거
                 
                 articles = self.get_complex_articles(complex_no, trade_type)
                 
@@ -686,15 +656,15 @@ class NaverRealEstateScraper:
                     property_data = self._parse_article(article, complex_info, trade_type)
                     all_properties.append(property_data)
                 
-                # 단지 간 Long Sleep (5분~10분)
-                delay = self._human_like_delay(5.0, 10.0)  # 5-10분
+                # ✅ 개선: 2배 빠른 단지 이동 (5-10분 → 2.5-5분)
+                delay = self._human_like_delay(2.5, 5.0)  # 2.5-5분 (2배 빠름!)
                 delay_minutes = delay / 60
                 logger.info(f"🏢 다음 단지로 이동... {delay_minutes:.1f}분 ({delay:.0f}초)")
                 time.sleep(delay)
                 
-                # 가끔 추가 Long Sleep (20% 확률로 15~30분 휴식)
+                # ✅ 개선: 2배 빠른 추가 휴식 (15-30분 → 7.5-15분)
                 if random.random() < 0.2:
-                    long_break_minutes = random.uniform(15, 30)
+                    long_break_minutes = random.uniform(7.5, 15)
                     long_break_seconds = long_break_minutes * 60
                     logger.info(f"💤 추가 장시간 휴식: {long_break_minutes:.1f}분 ({long_break_seconds:.0f}초)")
                     time.sleep(long_break_seconds)
