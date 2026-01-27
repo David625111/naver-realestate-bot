@@ -1,0 +1,32 @@
+{
+  "property_types": ["APT", "OPST"],
+  "trade_types": ["A1", "B1"],
+  "price_range": {
+    "A1": {
+      "min": 50000,
+      "max": 150000
+    },
+    "B1": {
+      "min": 30000,
+      "max": 80000
+    }
+  },
+  "area_range": {
+    "min": 59,
+    "max": 84
+  },
+  "approval_year": {
+    "min": 2018,
+    "max": 2024
+  },
+  "household_count": {
+    "min": 300,
+    "max": 2000
+  },
+  "floor_types": ["중간층", "고층"],
+  "room_count": [2, 3],
+  "bathroom_count": [2],
+  "directions": ["남향", "남동향", "남서향"],
+  "loan": "상관없음",
+  "options": []
+}

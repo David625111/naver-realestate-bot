@@ -1,0 +1,63 @@
+name: 네이버 부동산 크롤링
+
+on:
+  schedule:
+    # 2시간마다 실행 (UTC 기준, 한국 시간 -9시간)
+    - cron: '0 */2 * * *'
+  
+  # 수동 실행 가능
+  workflow_dispatch:
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 저장소 체크아웃
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Python 설정
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+    
+    - name: 의존성 설치
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: 데이터베이스 폴더 생성
+      run: |
+        mkdir -p data
+    
+    - name: 크롤링 실행
+      env:
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        SEARCH_REGIONS: ${{ secrets.SEARCH_REGIONS }}
+        TRADE_TYPES: ${{ secrets.TRADE_TYPES }}
+      run: |
+        cd src
+        python main.py
+    
+    - name: 데이터베이스 커밋
+      run: |
+        git config --local user.email "github-actions[bot]@users.noreply.github.com"
+        git config --local user.name "github-actions[bot]"
+        git add data/properties.db || true
+        git add *.log || true
+        git diff --quiet && git diff --staged --quiet || git commit -m "Update: 크롤링 결과 업데이트 $(date '+%Y-%m-%d %H:%M:%S')"
+        git push || true
+    
+    - name: 실행 결과 업로드
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: scraper-logs
+        path: |
+          src/scraper.log
+          data/properties.db
+        retention-days: 7
