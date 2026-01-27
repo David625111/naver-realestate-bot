@@ -1,6 +1,10 @@
 """
 네이버 부동산 크롤링 모듈
 API를 통해 매물 정보 수집
+
+✅ Selenium + requests 하이브리드 방식:
+- Selenium: 메인 페이지 방문, 쿠키 획득 (실제 브라우저)
+- requests: API 호출 (빠름)
 """
 
 import requests
@@ -10,6 +14,17 @@ from typing import List, Dict, Optional
 import logging
 from datetime import datetime
 import numpy as np
+
+# Selenium 관련 임포트
+try:
+    import undetected_chromedriver as uc
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.webdriver.support import expected_conditions as EC
+    SELENIUM_AVAILABLE = True
+except ImportError:
+    SELENIUM_AVAILABLE = False
+    logging.warning("Selenium을 사용할 수 없습니다. pip install undetected-chromedriver 설치가 필요합니다.")
 
 # 로깅 설정
 logging.basicConfig(
@@ -96,9 +111,16 @@ class NaverRealEstateScraper:
     
     BASE_URL = "https://new.land.naver.com"
     
-    def __init__(self):
-        """크롤러 초기화"""
+    def __init__(self, use_selenium: bool = True):
+        """
+        크롤러 초기화
+        
+        Args:
+            use_selenium: Selenium 사용 여부 (True: 실제 브라우저, False: requests만)
+        """
         self.session = requests.Session()
+        self.use_selenium = use_selenium and SELENIUM_AVAILABLE
+        self.driver = None  # Selenium WebDriver
         
         # ✅ 개선: 세션 시작 시 브라우저 프로필을 한 번만 선택 (핵심!)
         # 실제 사용자는 한 세션에서 브라우저를 바꾸지 않음!
@@ -108,6 +130,11 @@ class NaverRealEstateScraper:
         self.last_cookie_refresh = time.time()  # 마지막 쿠키 갱신 시간
         
         self._set_fixed_headers()  # 헤더를 한 번만 설정
+        
+        # Selenium 초기화
+        if self.use_selenium:
+            self._init_selenium()
+        
         self._visit_homepage()  # 초기 방문으로 쿠키 받기
         
         # 사람처럼 행동하기 위한 상태 관리
@@ -116,49 +143,115 @@ class NaverRealEstateScraper:
         self.session_start_time = time.time()  # 세션 시작 시간
         self.fatigue_level = 0.0  # 피로도 (0.0 ~ 1.0)
     
-    def _visit_homepage(self):
+    def _init_selenium(self):
         """
-        네이버 부동산 홈페이지 방문 (쿠키 받기)
-        실제 브라우저처럼 동작하기 위해
+        ✅ Selenium WebDriver 초기화 (undetected-chromedriver)
         
-        중요: 이 과정에서 NNB, JSESSIONID 등 네이버 쿠키를 받아야 합니다!
+        실제 Chrome 브라우저를 사용하여 쿠키를 획득합니다.
         """
         try:
-            logger.info("🌐 네이버 부동산 메인 페이지 방문 중 (쿠키 수신)...")
+            logger.info("🚀 Selenium (Chrome) 초기화 중...")
             
-            # Accept 헤더를 HTML 페이지용으로 변경
-            original_accept = self.session.headers.get('Accept', '')
-            self.session.headers['Accept'] = 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7'
+            # undetected-chromedriver 옵션 설정
+            options = uc.ChromeOptions()
             
-            # 메인 페이지 방문
-            response = self.session.get(self.BASE_URL, timeout=10)
+            # 헤드리스 모드 (백그라운드 실행)
+            # options.add_argument('--headless')  # 디버깅 시 주석 처리
             
-            # 쿠키 수신 확인
-            cookies = self.session.cookies.get_dict()
-            if cookies:
-                self.cookies_received = True
-                self.last_cookie_refresh = time.time()
-                logger.info(f"✅ 쿠키 수신 성공: {len(cookies)}개")
-                
-                # 주요 쿠키 로깅 (NNB, JSESSIONID 등)
-                important_cookies = ['NNB', 'JSESSIONID', 'nid_inf', 'NID_AUT', 'NID_SES']
-                found_cookies = [key for key in important_cookies if key in cookies]
-                if found_cookies:
-                    logger.info(f"🍪 주요 쿠키 확인: {', '.join(found_cookies)}")
-                else:
-                    logger.warning("⚠️  주요 쿠키(NNB, JSESSIONID)를 찾지 못했습니다.")
-            else:
-                logger.warning("⚠️  쿠키를 받지 못했습니다. 차단될 가능성 높음!")
+            # 기타 옵션
+            options.add_argument('--no-sandbox')
+            options.add_argument('--disable-dev-shm-usage')
+            options.add_argument('--disable-blink-features=AutomationControlled')
+            options.add_argument(f'user-agent={self.browser_profile["user_agent"]}')
             
-            # Accept 헤더 복원
-            if original_accept:
-                self.session.headers['Accept'] = original_accept
+            # WebDriver 생성
+            self.driver = uc.Chrome(options=options, version_main=None)
             
-            time.sleep(random.uniform(2, 4))
-            logger.info("✅ 초기 방문 완료 (세션 준비됨)")
+            logger.info("✅ Selenium 초기화 완료!")
             
         except Exception as e:
-            logger.warning(f"❌ 초기 방문 실패: {e}")
+            logger.error(f"❌ Selenium 초기화 실패: {e}")
+            logger.warning("⚠️  requests 모드로 전환합니다.")
+            self.use_selenium = False
+            self.driver = None
+    
+    def _visit_homepage(self):
+        """
+        ✅ 네이버 부동산 홈페이지 방문 (쿠키 받기)
+        
+        Selenium 사용 시: 실제 브라우저로 방문하여 JavaScript 실행 → 쿠키 획득!
+        requests 사용 시: 기존 방식 (쿠키 획득 실패 가능)
+        """
+        if self.use_selenium and self.driver:
+            # ✅ Selenium으로 메인 페이지 방문 (쿠키 획득 성공!)
+            try:
+                logger.info("🌐 Selenium으로 네이버 부동산 메인 페이지 방문 중...")
+                
+                self.driver.get(self.BASE_URL)
+                
+                # 페이지 로딩 대기 (최대 10초)
+                WebDriverWait(self.driver, 10).until(
+                    EC.presence_of_element_located((By.TAG_NAME, "body"))
+                )
+                
+                # 쿠키 획득 및 requests Session에 전달
+                selenium_cookies = self.driver.get_cookies()
+                
+                if selenium_cookies:
+                    for cookie in selenium_cookies:
+                        self.session.cookies.set(cookie['name'], cookie['value'])
+                    
+                    self.cookies_received = True
+                    self.last_cookie_refresh = time.time()
+                    logger.info(f"✅ 쿠키 수신 성공: {len(selenium_cookies)}개")
+                    
+                    # 주요 쿠키 로깅
+                    cookie_names = [c['name'] for c in selenium_cookies]
+                    important_cookies = ['NNB', 'JSESSIONID', 'nid_inf', 'NID_AUT', 'NID_SES']
+                    found_cookies = [key for key in important_cookies if key in cookie_names]
+                    if found_cookies:
+                        logger.info(f"🍪 주요 쿠키 확인: {', '.join(found_cookies)}")
+                else:
+                    logger.warning("⚠️  쿠키를 받지 못했습니다.")
+                
+                time.sleep(random.uniform(2, 4))
+                logger.info("✅ Selenium 초기 방문 완료 (세션 준비됨)")
+                
+            except Exception as e:
+                logger.error(f"❌ Selenium 방문 실패: {e}")
+                logger.warning("⚠️  requests 모드로 전환합니다.")
+                self.use_selenium = False
+        
+        else:
+            # ❌ requests만 사용 (쿠키 획득 실패 가능)
+            try:
+                logger.info("🌐 네이버 부동산 메인 페이지 방문 중 (requests)...")
+                
+                # Accept 헤더를 HTML 페이지용으로 변경
+                original_accept = self.session.headers.get('Accept', '')
+                self.session.headers['Accept'] = 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7'
+                
+                # 메인 페이지 방문
+                response = self.session.get(self.BASE_URL, timeout=10)
+                
+                # 쿠키 수신 확인
+                cookies = self.session.cookies.get_dict()
+                if cookies:
+                    self.cookies_received = True
+                    self.last_cookie_refresh = time.time()
+                    logger.info(f"✅ 쿠키 수신 성공: {len(cookies)}개")
+                else:
+                    logger.warning("⚠️  쿠키를 받지 못했습니다. 차단될 가능성 높음!")
+                
+                # Accept 헤더 복원
+                if original_accept:
+                    self.session.headers['Accept'] = original_accept
+                
+                time.sleep(random.uniform(2, 4))
+                logger.info("✅ 초기 방문 완료 (세션 준비됨)")
+                
+            except Exception as e:
+                logger.warning(f"❌ 초기 방문 실패: {e}")
     
     def _set_fixed_headers(self):
         """
@@ -329,7 +422,10 @@ class NaverRealEstateScraper:
     
     def _visit_landing_page(self, page_type: str):
         """
-        API 호출 전에 해당 페이지를 먼저 방문 (랜딩 페이지 전략)
+        ✅ API 호출 전에 해당 페이지를 먼저 방문 (랜딩 페이지 전략)
+        
+        Selenium 사용 시: 실제 브라우저로 방문하여 쿠키 갱신
+        requests 사용 시: 기존 방식
         
         Args:
             page_type: 'complexes' (단지 목록), 'complex' (단지 상세), 'articles' (매물 목록)
@@ -342,25 +438,49 @@ class NaverRealEstateScraper:
         
         landing_url = landing_urls.get(page_type, self.BASE_URL)
         
-        try:
-            logger.info(f"🚪 랜딩 페이지 방문: {landing_url}")
-            
-            # Accept 헤더를 HTML 페이지용으로 변경
-            original_accept = self.session.headers.get('Accept', '')
-            self.session.headers['Accept'] = 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8'
-            
-            # 페이지 방문
-            self.session.get(landing_url, timeout=10)
-            
-            # Accept 헤더 복원 (API 요청용)
-            if original_accept:
-                self.session.headers['Accept'] = original_accept
-            
-            # 짧은 대기 (0.5-1.5초)
-            time.sleep(random.uniform(0.5, 1.5))
-            
-        except Exception as e:
-            logger.warning(f"⚠️  랜딩 페이지 방문 실패: {e}")
+        if self.use_selenium and self.driver:
+            # ✅ Selenium으로 페이지 방문 (쿠키 갱신)
+            try:
+                logger.info(f"🚪 Selenium으로 랜딩 페이지 방문: {landing_url}")
+                
+                self.driver.get(landing_url)
+                
+                # 페이지 로딩 대기
+                WebDriverWait(self.driver, 5).until(
+                    EC.presence_of_element_located((By.TAG_NAME, "body"))
+                )
+                
+                # 쿠키 갱신
+                selenium_cookies = self.driver.get_cookies()
+                for cookie in selenium_cookies:
+                    self.session.cookies.set(cookie['name'], cookie['value'])
+                
+                time.sleep(random.uniform(0.5, 1.5))
+                
+            except Exception as e:
+                logger.warning(f"⚠️  Selenium 랜딩 페이지 방문 실패: {e}")
+        
+        else:
+            # ❌ requests로 페이지 방문
+            try:
+                logger.info(f"🚪 랜딩 페이지 방문: {landing_url}")
+                
+                # Accept 헤더를 HTML 페이지용으로 변경
+                original_accept = self.session.headers.get('Accept', '')
+                self.session.headers['Accept'] = 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8'
+                
+                # 페이지 방문
+                self.session.get(landing_url, timeout=10)
+                
+                # Accept 헤더 복원 (API 요청용)
+                if original_accept:
+                    self.session.headers['Accept'] = original_accept
+                
+                # 짧은 대기 (0.5-1.5초)
+                time.sleep(random.uniform(0.5, 1.5))
+                
+            except Exception as e:
+                logger.warning(f"⚠️  랜딩 페이지 방문 실패: {e}")
     
     def _get_referer_for_url(self, url: str) -> str:
         """
@@ -709,16 +829,32 @@ class NaverRealEstateScraper:
         }
 
 
+    def __del__(self):
+        """소멸자: Selenium WebDriver 종료"""
+        if self.driver:
+            try:
+                self.driver.quit()
+                logger.info("✅ Selenium WebDriver 종료됨")
+            except:
+                pass
+
+
 if __name__ == "__main__":
     # 테스트 코드
-    scraper = NaverRealEstateScraper()
+    scraper = NaverRealEstateScraper(use_selenium=True)  # ✅ Selenium 사용!
     
     # 강남구 대치동 지역 코드
     cortarNo = "1168010600"
     
-    properties = scraper.scrape_region(cortarNo, trade_types=["A1"])
+    try:
+        properties = scraper.scrape_region(cortarNo, trade_types=["B1"])
+        
+        print(f"\n크롤링 완료: {len(properties)}개 매물")
+        if properties:
+            print("\n첫 번째 매물 예시:")
+            print(properties[0])
     
-    print(f"\n크롤링 완료: {len(properties)}개 매물")
-    if properties:
-        print("\n첫 번째 매물 예시:")
-        print(properties[0])
+    finally:
+        # Selenium 종료
+        if scraper.driver:
+            scraper.driver.quit()
