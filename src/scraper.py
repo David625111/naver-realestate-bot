@@ -20,12 +20,24 @@ logger = logging.getLogger(__name__)
 class NaverRealEstateScraper:
     """네이버 부동산 크롤러 클래스"""
     
-    # 다양한 User-Agent 리스트 (차단 회피)
+    # 다양한 User-Agent 리스트 (차단 회피) - 더 다양하게!
     USER_AGENTS = [
+        # Chrome (Windows)
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+        # Chrome (Mac)
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
         'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0'
+        # Firefox (Windows)
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
+        # Firefox (Mac)
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:122.0) Gecko/20100101 Firefox/122.0',
+        # Edge
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36 Edg/121.0.0.0',
+        # Safari (Mac)
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15',
     ]
     
     BASE_URL = "https://new.land.naver.com"
@@ -34,6 +46,20 @@ class NaverRealEstateScraper:
         """크롤러 초기화"""
         self.session = requests.Session()
         self._update_headers()
+        self._visit_homepage()  # 초기 방문으로 쿠키 받기
+    
+    def _visit_homepage(self):
+        """
+        네이버 부동산 홈페이지 방문 (쿠키 받기)
+        실제 브라우저처럼 동작하기 위해
+        """
+        try:
+            logger.info("네이버 부동산 홈페이지 방문 중...")
+            self.session.get(self.BASE_URL, timeout=10)
+            time.sleep(random.uniform(2, 4))
+            logger.info("초기 방문 완료")
+        except Exception as e:
+            logger.warning(f"초기 방문 실패: {e}")
     
     def _update_headers(self):
         """요청 헤더 업데이트 (차단 회피)"""
@@ -48,7 +74,7 @@ class NaverRealEstateScraper:
     
     def _safe_request(self, url: str, params: Dict = None, retry: int = 3) -> Optional[Dict]:
         """
-        안전한 HTTP 요청 (재시도 포함)
+        안전한 HTTP 요청 (재시도 포함, 429 에러 특별 처리)
         
         Args:
             url: 요청 URL
@@ -60,26 +86,49 @@ class NaverRealEstateScraper:
         """
         for attempt in range(retry):
             try:
-                # 요청 간 랜덤 딜레이 (차단 회피)
-                if attempt > 0:
-                    delay = random.uniform(2, 5)
-                    logger.info(f"재시도 전 {delay:.1f}초 대기...")
-                    time.sleep(delay)
+                # 기본 요청 전 딜레이 (속도 제한)
+                if attempt == 0:
+                    time.sleep(random.uniform(1, 2))
                 
                 response = self.session.get(url, params=params, timeout=30)
                 
                 if response.status_code == 200:
                     return response.json()
+                
+                elif response.status_code == 429:
+                    # 429 Too Many Requests - 특별 처리!
+                    # 지수 백오프: 시도마다 대기 시간 증가
+                    wait_time = random.uniform(30, 60) * (2 ** attempt)  # 30초 → 60초 → 120초
+                    logger.warning(f"⚠️  429 에러 (Too Many Requests)")
+                    logger.info(f"📢 권장 대기 시간: {wait_time:.1f}초 대기...")
+                    
+                    if attempt < retry - 1:
+                        logger.info(f"재시도 예정 ({attempt + 2}/{retry})")
+                        time.sleep(wait_time)
+                        self._update_headers()  # User-Agent 변경
+                    else:
+                        logger.error("❌ 최대 재시도 횟수 초과. 나중에 다시 시도하세요.")
+                        return None
+                
                 elif response.status_code == 403:
+                    # 403 Forbidden
                     logger.warning(f"접근 거부 (403). 헤더 변경 후 재시도... ({attempt + 1}/{retry})")
                     self._update_headers()
+                    delay = random.uniform(5, 10)
+                    time.sleep(delay)
+                
                 else:
                     logger.warning(f"응답 코드 {response.status_code}")
+                    if attempt < retry - 1:
+                        delay = random.uniform(3, 7)
+                        time.sleep(delay)
                 
             except requests.exceptions.RequestException as e:
                 logger.error(f"요청 오류: {e}")
                 if attempt < retry - 1:
-                    time.sleep(random.uniform(3, 6))
+                    delay = random.uniform(5, 10)
+                    logger.info(f"오류 후 {delay:.1f}초 대기...")
+                    time.sleep(delay)
         
         return None
     
@@ -170,8 +219,8 @@ class NaverRealEstateScraper:
             articles = data['articleList']
             logger.info(f"검색된 매물 수: {len(articles)}")
             
-            # 랜덤 딜레이 (차단 회피)
-            time.sleep(random.uniform(1, 3))
+            # 랜덤 딜레이 (차단 회피) - 더 길게!
+            time.sleep(random.uniform(3, 6))
             
             return articles
         
@@ -193,8 +242,8 @@ class NaverRealEstateScraper:
         logger.info(f"매물 상세 정보: articleNo={article_no}")
         data = self._safe_request(url)
         
-        # 랜덤 딜레이
-        time.sleep(random.uniform(0.5, 1.5))
+        # 랜덤 딜레이 - 더 길게!
+        time.sleep(random.uniform(2, 4))
         
         return data
     
@@ -231,8 +280,10 @@ class NaverRealEstateScraper:
                     property_data = self._parse_article(article, complex_info, trade_type)
                     all_properties.append(property_data)
                 
-                # 단지 간 딜레이
-                time.sleep(random.uniform(2, 4))
+                # 단지 간 딜레이 - 더 길게! (차단 방지)
+                delay = random.uniform(5, 10)
+                logger.info(f"다음 단지 크롤링 전 {delay:.1f}초 대기...")
+                time.sleep(delay)
         
         logger.info(f"총 {len(all_properties)}개 매물 크롤링 완료")
         return all_properties
